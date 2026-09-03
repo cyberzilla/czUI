@@ -1,0 +1,9 @@
+*.exe
+*.dll
+*.ocx
+*.vbw
+*.log
+*.obj
+*.exp
+*.lib
+*.pdb
