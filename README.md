@@ -36,7 +36,7 @@
 | Element | Color | Hex |
 |---|---|---|
 | Form Background | Dark brown | `#1B2838` |
-| Panel | Slightly lighter | `#24344`7 |
+| Panel | Slightly lighter | `#243447` |
 | Border | Subtle edge | `#2C4158` |
 | Accent (Amber) | Primary action | `#F5A623` |
 | Text | White | `#FFFFFF` |
