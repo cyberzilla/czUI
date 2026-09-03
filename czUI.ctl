@@ -110,6 +110,32 @@ Private Declare Function RemoveProp Lib "user32" Alias "RemovePropA" (ByVal hWnd
 Private Declare Function ReleaseCapture Lib "user32" () As Long
 Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
 Private Declare Function GetCursorPos Lib "user32" (lpPoint As POINTAPI) As Long
+Private Declare Function DrawIconEx Lib "user32" (ByVal hDC As Long, ByVal xLeft As Long, ByVal yTop As Long, ByVal hIcon As Long, ByVal cxWidth As Long, ByVal cyWidth As Long, ByVal istepIfAniCur As Long, ByVal hbrFlickerFreeDraw As Long, ByVal diFlags As Long) As Long
+Private Const DI_NORMAL As Long = &H3
+Private Const IMAGE_ICON As Long = 1
+Private Const LR_COPYFROMRESOURCE As Long = &H4000
+Private Const GWL_STYLE As Long = -16
+Private Const WS_SYSMENU As Long = &H80000
+Private Declare Function GetWindowLong Lib "user32" Alias "GetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long) As Long
+Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
+Private Declare Function SetWindowPos Lib "user32" (ByVal hWnd As Long, ByVal hWndInsertAfter As Long, ByVal X As Long, ByVal Y As Long, ByVal cx As Long, ByVal cy As Long, ByVal uFlags As Long) As Long
+Private Const SWP_FRAMECHANGED As Long = &H20
+Private Const SWP_NOMOVE As Long = &H2
+Private Const SWP_NOSIZE As Long = &H1
+Private Const SWP_NOZORDER As Long = &H4
+Private Const GWL_WNDPROC As Long = -4
+Private Const WS_MINIMIZEBOX As Long = &H20000
+Private Const MEM_COMMIT As Long = &H1000
+Private Const MEM_RELEASE As Long = &H8000
+Private Const PAGE_EXECUTE_READWRITE As Long = &H40
+Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (ByRef Dest As Any, ByRef Src As Any, ByVal cb As Long)
+Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddr As Long, ByVal dwSize As Long, ByVal flType As Long, ByVal flProtect As Long) As Long
+Private Declare Function VirtualFree Lib "kernel32" (ByVal lpAddr As Long, ByVal dwSize As Long, ByVal dwFreeType As Long) As Long
+Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
+Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
+Private Declare Function PostMessage Lib "user32" Alias "PostMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Declare Function CopyImage Lib "user32" (ByVal hImage As Long, ByVal uType As Long, ByVal cxDesired As Long, ByVal cyDesired As Long, ByVal fuFlags As Long) As Long
+Private Declare Function DestroyIcon Lib "user32" (ByVal hIcon As Long) As Long
 Private Declare Function ScreenToClient Lib "user32" (ByVal hWnd As Long, lpPoint As POINTAPI) As Long
 Private Declare Function IsZoomed Lib "user32" (ByVal hWnd As Long) As Long
 Private Declare Function OleTranslateColor Lib "oleaut32.dll" (ByVal clr As Long, ByVal hPal As Long, ByRef lpColorRef As Long) As Long
@@ -137,6 +163,8 @@ Private Type RECTF
     Width  As Single
     Height As Single
 End Type
+
+
 
 Private Type POINTAPI
     X As Long
@@ -280,6 +308,10 @@ Private m_ExpandAnimFrom   As Single
 Private m_ExpandAnimStart  As Long
 Private m_ExpandAnimating  As Boolean
 Private m_NotchHover       As Boolean  ' Notch button hover state
+Private m_NeedDrawIcon     As Boolean  ' Flag to draw icon after GDI+ cleanup
+Private m_pSubclassThunk   As Long     ' ASM thunk for WM_SYSCOMMAND subclass
+Private m_OldWndProc       As Long     ' Original form window procedure
+Private m_SubclassHwnd     As Long     ' Subclassed form hWnd
 
 ' Notch button constants
 Private Const NOTCH_WIDTH  As Long = 20   ' Width of notch button (px)
@@ -344,6 +376,7 @@ End Sub
 
 Private Sub UserControl_Terminate()
     m_Initialized = False
+    UnsubclassForm
     On Error Resume Next
     tmrTrack.Enabled = False
     On Error GoTo 0
@@ -401,8 +434,8 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
     With PropBag
         m_ControlType = .ReadProperty("ControlType", czButton)
         m_Caption = .ReadProperty("Caption", "")
-        m_BackColor = .ReadProperty("BackColor", CLR_FORM_BG)
-        m_ForeColor = .ReadProperty("ForeColor", CLR_WHITE)
+        m_BackColor = ReadColorProp(PropBag, "BackColor", CLR_FORM_BG)
+        m_ForeColor = ReadColorProp(PropBag, "ForeColor", CLR_WHITE)
         m_CornerRadius = .ReadProperty("CornerRadius", 8)
         m_FontName = .ReadProperty("FontName", "Segoe UI")
         m_FontSize = .ReadProperty("FontSize", 10!)
@@ -411,7 +444,7 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
         m_Alignment = .ReadProperty("Alignment", alLeft)
         
         m_ButtonStyle = .ReadProperty("ButtonStyle", bsPrimary)
-        m_ButtonColor = .ReadProperty("ButtonColor", CLR_AMBER)
+        m_ButtonColor = ReadColorProp(PropBag, "ButtonColor", CLR_AMBER)
         
         m_ShowMinButton = .ReadProperty("ShowMinButton", True)
         m_ShowMaxButton = .ReadProperty("ShowMaxButton", True)
@@ -419,7 +452,7 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
         m_ShowFullScreenButton = .ReadProperty("ShowFullScreenButton", True)
         m_AutoHandleButtons = .ReadProperty("AutoHandleButtons", True)
         
-        m_BorderColor = .ReadProperty("BorderColor", CLR_BORDER)
+        m_BorderColor = ReadColorProp(PropBag, "BorderColor", CLR_BORDER)
         m_BorderWidth = .ReadProperty("BorderWidth", 1)
         m_ShowHeader = .ReadProperty("ShowHeader", False)
         m_HeaderText = .ReadProperty("HeaderText", "")
@@ -428,16 +461,16 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
         m_ExpandWidth = .ReadProperty("ExpandWidth", 200)
         
         m_Checked = .ReadProperty("Checked", False)
-        m_OnColor = .ReadProperty("OnColor", CLR_AMBER)
-        m_OffColor = .ReadProperty("OffColor", CLR_GRAY)
+        m_OnColor = ReadColorProp(PropBag, "OnColor", CLR_AMBER)
+        m_OffColor = ReadColorProp(PropBag, "OffColor", CLR_GRAY)
         
         m_Text = .ReadProperty("Text", "")
         m_PlaceholderText = .ReadProperty("PlaceholderText", "")
-        m_FocusBorderColor = .ReadProperty("FocusBorderColor", CLR_ACCENT)
+        m_FocusBorderColor = ReadColorProp(PropBag, "FocusBorderColor", CLR_ACCENT)
         m_PasswordChar = .ReadProperty("PasswordChar", "")
         
         m_Progress = .ReadProperty("Progress", 0)
-        m_BarColor = .ReadProperty("BarColor", CLR_ACCENT)
+        m_BarColor = ReadColorProp(PropBag, "BarColor", CLR_ACCENT)
         m_ShowPercent = .ReadProperty("ShowPercent", True)
     End With
     
@@ -452,8 +485,8 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
     With PropBag
         .WriteProperty "ControlType", m_ControlType, czButton
         .WriteProperty "Caption", m_Caption, ""
-        .WriteProperty "BackColor", m_BackColor, CLR_FORM_BG
-        .WriteProperty "ForeColor", m_ForeColor, CLR_WHITE
+        .WriteProperty "BackColor", ColorToHex(m_BackColor), ColorToHex(CLR_FORM_BG)
+        .WriteProperty "ForeColor", ColorToHex(m_ForeColor), ColorToHex(CLR_WHITE)
         .WriteProperty "CornerRadius", m_CornerRadius, 8
         .WriteProperty "FontName", m_FontName, "Segoe UI"
         .WriteProperty "FontSize", m_FontSize, 10!
@@ -462,7 +495,7 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
         .WriteProperty "Alignment", m_Alignment, alLeft
         
         .WriteProperty "ButtonStyle", m_ButtonStyle, bsPrimary
-        .WriteProperty "ButtonColor", m_ButtonColor, CLR_AMBER
+        .WriteProperty "ButtonColor", ColorToHex(m_ButtonColor), ColorToHex(CLR_AMBER)
         
         .WriteProperty "ShowMinButton", m_ShowMinButton, True
         .WriteProperty "ShowMaxButton", m_ShowMaxButton, True
@@ -470,7 +503,7 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
         .WriteProperty "ShowFullScreenButton", m_ShowFullScreenButton, True
         .WriteProperty "AutoHandleButtons", m_AutoHandleButtons, True
         
-        .WriteProperty "BorderColor", m_BorderColor, CLR_BORDER
+        .WriteProperty "BorderColor", ColorToHex(m_BorderColor), ColorToHex(CLR_BORDER)
         .WriteProperty "BorderWidth", m_BorderWidth, 1
         .WriteProperty "ShowHeader", m_ShowHeader, False
         .WriteProperty "HeaderText", m_HeaderText, ""
@@ -479,16 +512,16 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
         .WriteProperty "ExpandWidth", m_ExpandWidth, 200
         
         .WriteProperty "Checked", m_Checked, False
-        .WriteProperty "OnColor", m_OnColor, CLR_AMBER
-        .WriteProperty "OffColor", m_OffColor, CLR_GRAY
+        .WriteProperty "OnColor", ColorToHex(m_OnColor), ColorToHex(CLR_AMBER)
+        .WriteProperty "OffColor", ColorToHex(m_OffColor), ColorToHex(CLR_GRAY)
         
         .WriteProperty "Text", m_Text, ""
         .WriteProperty "PlaceholderText", m_PlaceholderText, ""
-        .WriteProperty "FocusBorderColor", m_FocusBorderColor, CLR_ACCENT
+        .WriteProperty "FocusBorderColor", ColorToHex(m_FocusBorderColor), ColorToHex(CLR_ACCENT)
         .WriteProperty "PasswordChar", m_PasswordChar, ""
         
         .WriteProperty "Progress", m_Progress, 0
-        .WriteProperty "BarColor", m_BarColor, CLR_ACCENT
+        .WriteProperty "BarColor", ColorToHex(m_BarColor), ColorToHex(CLR_ACCENT)
         .WriteProperty "ShowPercent", m_ShowPercent, True
     End With
 End Sub
@@ -516,6 +549,9 @@ Private Sub ApplyFormRoundCorners()
     Dim hWndForm As Long
     hWndForm = UserControl.Parent.hWnd
     If hWndForm = 0 Then Exit Sub
+    
+    ' Subclass form for taskbar close / Alt+F4 support
+    SubclassFormForClose hWndForm
     
     ' When maximized or fullscreen: no rounding
     If IsZoomed(hWndForm) <> 0 Or m_IsFullScreen Then
@@ -834,6 +870,46 @@ Private Function TranslateColor(ByVal oleClr As Long) As Long
     TranslateColor = rgbClr
 End Function
 
+' Convert VB6 Long (BGR) to web hex format "#RRGGBB"
+Private Function ColorToHex(ByVal clr As Long) As String
+    Dim R As Long: R = clr And &HFF&
+    Dim G As Long: G = (clr \ &H100&) And &HFF&
+    Dim B As Long: B = (clr \ &H10000) And &HFF&
+    ColorToHex = "#" & Right$("0" & Hex$(R), 2) & Right$("0" & Hex$(G), 2) & Right$("0" & Hex$(B), 2)
+End Function
+
+' Convert web hex "#RRGGBB" or "#AARRGGBB" or VB6 "&HBBGGRR" to Long (BGR)
+Private Function HexToColor(ByVal sColor As String) As Long
+    sColor = Trim$(sColor)
+    If Left$(sColor, 1) = "#" Then
+        sColor = Mid$(sColor, 2)
+        If Len(sColor) = 8 Then
+            ' #AARRGGBB - ignore alpha, take RGB
+            sColor = Mid$(sColor, 3)
+        End If
+        If Len(sColor) <> 6 Then Exit Function
+        Dim R As Long: R = Val("&H" & Mid$(sColor, 1, 2))
+        Dim G As Long: G = Val("&H" & Mid$(sColor, 3, 2))
+        Dim B As Long: B = Val("&H" & Mid$(sColor, 5, 2))
+        HexToColor = RGB(R, G, B)
+    ElseIf Left$(sColor, 2) = "&H" Or Left$(sColor, 2) = "&h" Then
+        HexToColor = Val(sColor)
+    Else
+        HexToColor = Val(sColor)
+    End If
+End Function
+
+' Read color property that may be stored as Long (old) or String hex (new)
+Private Function ReadColorProp(PropBag As PropertyBag, ByVal Name As String, ByVal Default As Long) As Long
+    Dim v As Variant
+    v = PropBag.ReadProperty(Name, Default)
+    If VarType(v) = vbString Then
+        ReadColorProp = HexToColor(CStr(v))
+    Else
+        ReadColorProp = CLng(v)
+    End If
+End Function
+
 Private Function LightenColor(ByVal clrARGB As Long, ByVal Percent As Long) As Long
     ' Lighten an ARGB color by percentage
     Dim A As Long, R As Long, G As Long, B As Long
@@ -1133,6 +1209,94 @@ End Function
 '==============================================================================
 ' SECTION 15: CONTROL CONFIGURATION
 '==============================================================================
+'==============================================================================
+' SECTION: Subclass form for WM_SYSCOMMAND SC_CLOSE (ASM thunk)
+' Enables taskbar close / thumbnail X / Alt+F4 on borderless forms
+'==============================================================================
+Private Sub SubclassFormForClose(ByVal hWnd As Long)
+    If m_pSubclassThunk <> 0 Then Exit Sub  ' Already subclassed
+    
+    ' Add WS_SYSMENU | WS_MINIMIZEBOX to window style
+    Dim style As Long
+    style = GetWindowLong(hWnd, GWL_STYLE) Or WS_SYSMENU Or WS_MINIMIZEBOX
+    SetWindowLong hWnd, GWL_STYLE, style
+    SetWindowPos hWnd, 0, 0, 0, 0, 0, _
+        SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or SWP_FRAMECHANGED
+    
+    ' Get original wndproc
+    m_OldWndProc = GetWindowLong(hWnd, GWL_WNDPROC)
+    m_SubclassHwnd = hWnd
+    
+    ' Get PostMessageA function address
+    Dim hU32 As Long: hU32 = GetModuleHandle("user32")
+    Dim pPost As Long: pPost = GetProcAddress(hU32, "PostMessageA")
+    If pPost = 0 Then Exit Sub
+    
+    ' Allocate executable memory for thunk
+    m_pSubclassThunk = VirtualAlloc(0&, 64&, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+    If m_pSubclassThunk = 0 Then Exit Sub
+    
+    ' Build x86 machine code:
+    ' if (msg == WM_SYSCOMMAND && (wParam & 0xFFF0) == SC_CLOSE)
+    '   { PostMessage(hwnd, WM_CLOSE, 0, 0); return 0; }
+    ' else { jmp oldProc; }
+    Dim code(63) As Byte
+    
+    ' 00: cmp dword [esp+8], 0x112  (msg == WM_SYSCOMMAND?)
+    code(0) = &H81: code(1) = &H7C: code(2) = &H24: code(3) = &H8
+    code(4) = &H12: code(5) = &H1: code(6) = &H0: code(7) = &H0
+    ' 08: jne callOriginal (+0x25 -> offset 0x2F)
+    code(8) = &H75: code(9) = &H25
+    ' 0A: mov eax, [esp+12]  (wParam)
+    code(&HA) = &H8B: code(&HB) = &H44: code(&HC) = &H24: code(&HD) = &HC
+    ' 0E: and eax, 0xFFF0
+    code(&HE) = &H25: code(&HF) = &HF0: code(&H10) = &HFF: code(&H11) = &H0: code(&H12) = &H0
+    ' 13: cmp eax, 0xF060  (SC_CLOSE?)
+    code(&H13) = &H3D: code(&H14) = &H60: code(&H15) = &HF0: code(&H16) = &H0: code(&H17) = &H0
+    ' 18: jne callOriginal (+0x15 -> offset 0x2F)
+    code(&H18) = &H75: code(&H19) = &H15
+    ' 1A: push 0 (lParam)
+    code(&H1A) = &H6A: code(&H1B) = &H0
+    ' 1C: push 0 (wParam)
+    code(&H1C) = &H6A: code(&H1D) = &H0
+    ' 1E: push 0x10 (WM_CLOSE)
+    code(&H1E) = &H6A: code(&H1F) = &H10
+    ' 20: push [esp+16] (hwnd, +12 for 3 pushes + 4 original)
+    code(&H20) = &HFF: code(&H21) = &H74: code(&H22) = &H24: code(&H23) = &H10
+    ' 24: call [pThunk+0x35] (PostMessage)
+    code(&H24) = &HFF: code(&H25) = &H15
+    Dim pAddr As Long: pAddr = m_pSubclassThunk + &H35
+    CopyMemory code(&H26), pAddr, 4
+    ' 2A: xor eax, eax (return 0)
+    code(&H2A) = &H33: code(&H2B) = &HC0
+    ' 2C: ret 16 (stdcall cleanup)
+    code(&H2C) = &HC2: code(&H2D) = &H10: code(&H2E) = &H0
+    ' 2F: callOriginal - jmp [pThunk+0x39] (oldProc)
+    code(&H2F) = &HFF: code(&H30) = &H25
+    pAddr = m_pSubclassThunk + &H39
+    CopyMemory code(&H31), pAddr, 4
+    ' 35: data - PostMessage address
+    CopyMemory code(&H35), pPost, 4
+    ' 39: data - old wndproc address
+    CopyMemory code(&H39), m_OldWndProc, 4
+    
+    ' Copy to executable memory
+    CopyMemory ByVal m_pSubclassThunk, code(0), 64
+    
+    ' Install subclass
+    SetWindowLong hWnd, GWL_WNDPROC, m_pSubclassThunk
+End Sub
+
+Private Sub UnsubclassForm()
+    If m_pSubclassThunk <> 0 And m_SubclassHwnd <> 0 Then
+        SetWindowLong m_SubclassHwnd, GWL_WNDPROC, m_OldWndProc
+        VirtualFree m_pSubclassThunk, 0&, MEM_RELEASE
+        m_pSubclassThunk = 0
+        m_OldWndProc = 0
+        m_SubclassHwnd = 0
+    End If
+End Sub
+
 Private Sub ConfigureForType()
     Select Case m_ControlType
         Case czTextBox
@@ -1247,6 +1411,34 @@ Private Sub RedrawControl()
     End Select
     
     GdipDeleteGraphics hG
+    
+    ' Draw form icon AFTER GDI+ is released
+    If m_NeedDrawIcon Then
+        m_NeedDrawIcon = False
+        On Error Resume Next
+        Dim icSize As Long: icSize = 16
+        Dim icX As Long: icX = TB_ICON_WIDTH \ 2 - icSize \ 2
+        Dim icY As Long: icY = h \ 2 - icSize \ 2
+        Dim hIcon As Long
+        Dim hSmallIcon As Long
+        Dim needDestroy As Boolean: needDestroy = False
+        
+        ' Get icon handle from form
+        hIcon = UserControl.Parent.Icon.Handle
+        
+        If Err.Number = 0 And hIcon <> 0 Then
+            ' Extract 16x16 version from icon resource (not scaled from 32x32)
+            hSmallIcon = CopyImage(hIcon, IMAGE_ICON, icSize, icSize, LR_COPYFROMRESOURCE)
+            If hSmallIcon <> 0 Then
+                DrawIconEx UserControl.hDC, icX, icY, hSmallIcon, icSize, icSize, 0, 0, DI_NORMAL
+                DestroyIcon hSmallIcon
+            Else
+                ' Fallback: draw original (will be scaled)
+                DrawIconEx UserControl.hDC, icX, icY, hIcon, icSize, icSize, 0, 0, DI_NORMAL
+            End If
+        End If
+        On Error GoTo 0
+    End If
     
     ' Flush persistent bitmap to screen
     If UserControl.AutoRedraw Then UserControl.Refresh
@@ -1583,19 +1775,25 @@ Private Sub RenderTitleBar(ByVal hG As Long, ByVal w As Long, ByVal h As Long)
         FillRoundRect hG, 0!, 0!, CSng(TB_ICON_WIDTH), CSng(h), 0!, ColorToARGB(CLR_WHITE, 20)
     End If
     
-    ' Draw gear icon - use AA for smooth circles
-    Dim iconCx As Long: iconCx = CLng(CSng(TB_ICON_WIDTH) / 2!)
+    ' Draw form icon area
+    Dim iconCx As Long: iconCx = TB_ICON_WIDTH \ 2
     Dim iconCy As Long: iconCy = CLng(cy)
     
-    GdipSetSmoothingMode hG, GP_SMOOTH_ANTIALIAS
-    GdipSetPixelOffsetMode hG, GP_PIXELOFFSET_HQ
-    
-    GdipCreatePen1 ColorToARGB(CLR_WHITE, 180), 1!, GP_UNIT_PIXEL, hPen
-    GdipDrawEllipse hG, hPen, CSng(iconCx) - 4.5!, CSng(iconCy) - 4.5!, 9!, 9!
-    GdipDeletePen hPen
-    GdipCreateSolidFill ColorToARGB(m_BackColor), hBrush
-    GdipFillEllipse hG, hBrush, CSng(iconCx) - 2!, CSng(iconCy) - 2!, 4!, 4!
-    GdipDeleteBrush hBrush
+    If Ambient.UserMode Then
+        ' Icon will be drawn AFTER GDI+ cleanup (in RedrawControl)
+        ' to avoid GDI/GDI+ conflicts
+        m_NeedDrawIcon = True
+    Else
+        ' Design-time: draw gear circle fallback
+        GdipSetSmoothingMode hG, GP_SMOOTH_ANTIALIAS
+        GdipSetPixelOffsetMode hG, GP_PIXELOFFSET_HQ
+        GdipCreatePen1 ColorToARGB(CLR_WHITE, 180), 1!, GP_UNIT_PIXEL, hPen
+        GdipDrawEllipse hG, hPen, CSng(iconCx) - 4.5!, CSng(iconCy) - 4.5!, 9!, 9!
+        GdipDeletePen hPen
+        GdipCreateSolidFill ColorToARGB(m_BackColor), hBrush
+        GdipFillEllipse hG, hBrush, CSng(iconCx) - 2!, CSng(iconCy) - 2!, 4!, 4!
+        GdipDeleteBrush hBrush
+    End If
     
     ' Restore rendering modes
     GdipSetSmoothingMode hG, GP_SMOOTH_ANTIALIAS
@@ -1786,12 +1984,12 @@ Public Property Let Caption(ByVal vNewValue As String)
     PropertyChanged "Caption"
 End Property
 
-Public Property Get BackColor() As Long
-    BackColor = m_BackColor
+Public Property Get BackColor() As String
+    BackColor = ColorToHex(m_BackColor)
 End Property
 
-Public Property Let BackColor(ByVal vNewValue As Long)
-    m_BackColor = vNewValue
+Public Property Let BackColor(ByVal vNewValue As String)
+    m_BackColor = HexToColor(vNewValue)
     If m_ControlType = czTextBox Then
         txtEmbed.BackColor = TranslateColor(m_BackColor)
     End If
@@ -1799,12 +1997,12 @@ Public Property Let BackColor(ByVal vNewValue As Long)
     PropertyChanged "BackColor"
 End Property
 
-Public Property Get ForeColor() As Long
-    ForeColor = m_ForeColor
+Public Property Get ForeColor() As String
+    ForeColor = ColorToHex(m_ForeColor)
 End Property
 
-Public Property Let ForeColor(ByVal vNewValue As Long)
-    m_ForeColor = vNewValue
+Public Property Let ForeColor(ByVal vNewValue As String)
+    m_ForeColor = HexToColor(vNewValue)
     If m_ControlType = czTextBox And Not m_IsPlaceholder Then
         txtEmbed.ForeColor = TranslateColor(m_ForeColor)
     End If
@@ -1892,12 +2090,12 @@ Public Property Let ButtonStyle(ByVal vNewValue As czButtonStyle)
     PropertyChanged "ButtonStyle"
 End Property
 
-Public Property Get ButtonColor() As Long
-    ButtonColor = m_ButtonColor
+Public Property Get ButtonColor() As String
+    ButtonColor = ColorToHex(m_ButtonColor)
 End Property
 
-Public Property Let ButtonColor(ByVal vNewValue As Long)
-    m_ButtonColor = vNewValue
+Public Property Let ButtonColor(ByVal vNewValue As String)
+    m_ButtonColor = HexToColor(vNewValue)
     RedrawControl
     PropertyChanged "ButtonColor"
 End Property
@@ -1955,12 +2153,12 @@ End Property
 
 ' --- Panel Properties ---
 
-Public Property Get BorderColor() As Long
-    BorderColor = m_BorderColor
+Public Property Get BorderColor() As String
+    BorderColor = ColorToHex(m_BorderColor)
 End Property
 
-Public Property Let BorderColor(ByVal vNewValue As Long)
-    m_BorderColor = vNewValue
+Public Property Let BorderColor(ByVal vNewValue As String)
+    m_BorderColor = HexToColor(vNewValue)
     RedrawControl
     PropertyChanged "BorderColor"
 End Property
@@ -2008,22 +2206,22 @@ Public Property Let Checked(ByVal vNewValue As Boolean)
     PropertyChanged "Checked"
 End Property
 
-Public Property Get OnColor() As Long
-    OnColor = m_OnColor
+Public Property Get OnColor() As String
+    OnColor = ColorToHex(m_OnColor)
 End Property
 
-Public Property Let OnColor(ByVal vNewValue As Long)
-    m_OnColor = vNewValue
+Public Property Let OnColor(ByVal vNewValue As String)
+    m_OnColor = HexToColor(vNewValue)
     RedrawControl
     PropertyChanged "OnColor"
 End Property
 
-Public Property Get OffColor() As Long
-    OffColor = m_OffColor
+Public Property Get OffColor() As String
+    OffColor = ColorToHex(m_OffColor)
 End Property
 
-Public Property Let OffColor(ByVal vNewValue As Long)
-    m_OffColor = vNewValue
+Public Property Let OffColor(ByVal vNewValue As String)
+    m_OffColor = HexToColor(vNewValue)
     RedrawControl
     PropertyChanged "OffColor"
 End Property
@@ -2059,12 +2257,12 @@ Public Property Let PlaceholderText(ByVal vNewValue As String)
     PropertyChanged "PlaceholderText"
 End Property
 
-Public Property Get FocusBorderColor() As Long
-    FocusBorderColor = m_FocusBorderColor
+Public Property Get FocusBorderColor() As String
+    FocusBorderColor = ColorToHex(m_FocusBorderColor)
 End Property
 
-Public Property Let FocusBorderColor(ByVal vNewValue As Long)
-    m_FocusBorderColor = vNewValue
+Public Property Let FocusBorderColor(ByVal vNewValue As String)
+    m_FocusBorderColor = HexToColor(vNewValue)
     RedrawControl
     PropertyChanged "FocusBorderColor"
 End Property
@@ -2099,12 +2297,12 @@ Public Property Let Progress(ByVal vNewValue As Long)
     PropertyChanged "Progress"
 End Property
 
-Public Property Get BarColor() As Long
-    BarColor = m_BarColor
+Public Property Get BarColor() As String
+    BarColor = ColorToHex(m_BarColor)
 End Property
 
-Public Property Let BarColor(ByVal vNewValue As Long)
-    m_BarColor = vNewValue
+Public Property Let BarColor(ByVal vNewValue As String)
+    m_BarColor = HexToColor(vNewValue)
     RedrawControl
     PropertyChanged "BarColor"
 End Property
@@ -2155,3 +2353,14 @@ Public Sub Refresh()
     ' Force a complete redraw
     RedrawControl
 End Sub
+
+Public Function WebColor(ByVal hex As String) As Long
+    ' Convert web color format (#RRGGBB) to VB6 Long (BGR)
+    ' Usage: czButton1.BackColor = czButton1.WebColor("#F5A623")
+    hex = Replace(hex, "#", "")
+    If Len(hex) <> 6 Then Exit Function
+    Dim R As Long: R = Val("&H" & Mid$(hex, 1, 2))
+    Dim G As Long: G = Val("&H" & Mid$(hex, 3, 2))
+    Dim B As Long: B = Val("&H" & Mid$(hex, 5, 2))
+    WebColor = RGB(R, G, B)
+End Function

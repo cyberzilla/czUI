@@ -13,7 +13,7 @@ Begin VB.Form frmDemo
    ScaleWidth      =   440
    StartUpPosition =   2  'CenterScreen
    Begin czFormDemo.czControl czTitleBar1 
-      Height          =   465
+      Height          =   435
       Left            =   0
       TabIndex        =   0
       Top             =   0
@@ -22,6 +22,7 @@ Begin VB.Form frmDemo
       _ExtentY        =   820
       ControlType     =   0
       Caption         =   "czForm Demo"
+      BackColor       =   "#B0C8E2"
       CornerRadius    =   0
       FontSize        =   11
       FontBold        =   -1  'True
@@ -35,7 +36,7 @@ Begin VB.Form frmDemo
       _ExtentX        =   11007
       _ExtentY        =   2381
       ControlType     =   3
-      BackColor       =   4666404
+      BackColor       =   "#243447"
       CornerRadius    =   6
       ShowHeader      =   -1  'True
       HeaderText      =   "Data Traffic"
@@ -50,7 +51,7 @@ Begin VB.Form frmDemo
       _ExtentY        =   529
       ControlType     =   2
       Caption         =   "Downloaded          3.4 MB"
-      BackColor       =   4666404
+      BackColor       =   "#243447"
       FontSize        =   9
    End
    Begin czFormDemo.czControl czLabel2 
@@ -63,7 +64,7 @@ Begin VB.Form frmDemo
       _ExtentY        =   529
       ControlType     =   2
       Caption         =   "Uploaded              6.2 MB"
-      BackColor       =   4666404
+      BackColor       =   "#243447"
       FontSize        =   9
    End
    Begin czFormDemo.czControl czLabel3 
@@ -99,7 +100,7 @@ Begin VB.Form frmDemo
       _ExtentY        =   529
       ControlType     =   2
       Caption         =   "Bandwidth Usage"
-      ForeColor       =   11180424
+      ForeColor       =   "#8899AA"
       FontSize        =   8
    End
    Begin czFormDemo.czControl czProgress1 
@@ -124,7 +125,7 @@ Begin VB.Form frmDemo
       _ExtentX        =   11007
       _ExtentY        =   900
       ControlType     =   4
-      BackColor       =   4666404
+      BackColor       =   "#243447"
       Text            =   "Search location..."
       PlaceholderText =   "Search location..."
    End
@@ -151,7 +152,7 @@ Begin VB.Form frmDemo
       _ExtentY        =   582
       ControlType     =   2
       Caption         =   "Location: United States, Honolulu"
-      ForeColor       =   11180424
+      ForeColor       =   "#8899AA"
       FontSize        =   9
    End
 End
