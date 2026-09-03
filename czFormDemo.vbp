@@ -1,5 +1,5 @@
 Type=Exe
-UserControl=czControl.ctl
+UserControl=czUI.ctl
 Form=frmDemo.frm
 Startup="frmDemo"
 HelpFile=""
